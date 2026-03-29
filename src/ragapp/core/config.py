@@ -37,53 +37,53 @@ class Settings(BaseSettings):
     allowed_origins: List[str] = ["*"]
     port: int | None = 8000
 
-    # ── AWS Region ─────────────────────────────────────────────────────────────
-    aws_region: str = "us-east-1"
+    # # ── AWS Region ─────────────────────────────────────────────────────────────
+    # aws_region: str = "us-east-1"
 
-    # ── S3 ─────────────────────────────────────────────────────────────────────
-    s3_bucket_name: str  # e.g. rag-documents-dev
-    s3_raw_prefix: str = "raw/"
-    s3_processed_prefix: str = "processed/"
-    s3_failed_prefix: str = "failed/"
-    s3_chunks_prefix: str = "processed/chunks/"
+    # # ── S3 ─────────────────────────────────────────────────────────────────────
+    # s3_bucket_name: str  # e.g. rag-documents-dev
+    # s3_raw_prefix: str = "raw/"
+    # s3_processed_prefix: str = "processed/"
+    # s3_failed_prefix: str = "failed/"
+    # s3_chunks_prefix: str = "processed/chunks/"
 
-    # ── DynamoDB ───────────────────────────────────────────────────────────────
-    dynamodb_table_name: str = "documents"
+    # # ── DynamoDB ───────────────────────────────────────────────────────────────
+    # dynamodb_table_name: str = "documents"
 
-    # ── OpenSearch ─────────────────────────────────────────────────────────────
-    opensearch_endpoint: str  # e.g. https://xxx.us-east-1.es.amazonaws.com
-    opensearch_index: str = "rag-chunks"
-    opensearch_username: str = "admin"  # used for dev (anonymous access disabled)
-    opensearch_password: str = "admin"
+    # # ── OpenSearch ─────────────────────────────────────────────────────────────
+    # opensearch_endpoint: str  # e.g. https://xxx.us-east-1.es.amazonaws.com
+    # opensearch_index: str = "rag-chunks"
+    # opensearch_username: str = "admin"  # used for dev (anonymous access disabled)
+    # opensearch_password: str = "admin"
 
-    # ── ElastiCache / Redis ────────────────────────────────────────────────────
-    redis_host: str  # e.g. rag-cache.xxx.cache.amazonaws.com
-    redis_port: int = 6379
-    redis_db: int = 0
+    # # ── ElastiCache / Redis ────────────────────────────────────────────────────
+    # redis_host: str  # e.g. rag-cache.xxx.cache.amazonaws.com
+    # redis_port: int = 6379
+    # redis_db: int = 0
 
-    # ── Bedrock — Embeddings ───────────────────────────────────────────────────
-    bedrock_region: str = "us-east-1"
-    embedding_model_id: str = "amazon.titan-embed-text-v2:0"
-    embedding_dimensions: int = 1024
-    embedding_batch_size: int = 25
+    # # ── Bedrock — Embeddings ───────────────────────────────────────────────────
+    # bedrock_region: str = "us-east-1"
+    # embedding_model_id: str = "amazon.titan-embed-text-v2:0"
+    # embedding_dimensions: int = 1024
+    # embedding_batch_size: int = 25
 
-    # ── Bedrock — LLM ─────────────────────────────────────────────────────────
-    llm_model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
-    llm_max_tokens: int = 4096
-    llm_temperature: float = 0.7
+    # # ── Bedrock — LLM ─────────────────────────────────────────────────────────
+    # llm_model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    # llm_max_tokens: int = 4096
+    # llm_temperature: float = 0.7
 
-    # ── Step Functions ─────────────────────────────────────────────────────────
-    state_machine_arn: str = ""  # set after CDK deployment
+    # # ── Step Functions ─────────────────────────────────────────────────────────
+    # state_machine_arn: str = ""  # set after CDK deployment
 
-    # ── Retrieval ─────────────────────────────────────────────────────────────
-    default_top_k: int = 5
-    knn_candidates: int = 20  # kNN fetches 20, RRF narrows to top_k
-    rrf_k_constant: int = 60  # standard RRF constant
+    # # ── Retrieval ─────────────────────────────────────────────────────────────
+    # default_top_k: int = 5
+    # knn_candidates: int = 20  # kNN fetches 20, RRF narrows to top_k
+    # rrf_k_constant: int = 60  # standard RRF constant
 
-    # ── Cache TTLs (seconds) ──────────────────────────────────────────────────
-    cache_ttl_embedding: int = 604800  # 7 days
-    cache_ttl_query_result: int = 3600  # 1 hour
-    cache_ttl_llm_response: int = 86400  # 24 hours
+    # # ── Cache TTLs (seconds) ──────────────────────────────────────────────────
+    # cache_ttl_embedding: int = 604800  # 7 days
+    # cache_ttl_query_result: int = 3600  # 1 hour
+    # cache_ttl_llm_response: int = 86400  # 24 hours
 
     # ── Document Processing ───────────────────────────────────────────────────
     max_file_size_mb: int = 50
