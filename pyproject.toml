@@ -11,25 +11,34 @@ authors = [
 keywords = ["aws", "rag", "retrieval-augmented generation", "python"]
 
 dependencies = [
-    "black>=26.1.0",
-    "boto3>=1.42.59",
-    "botocore>=1.42.59",
     "fastapi>=0.135.0",
-    "flake8>=7.3.0",
-    "httpx>=0.28.1",
-    "moto[dynamodb,s3,stepfunctions]>=5.1.21",
-    "mypy>=1.19.1",
-    "opensearch-py>=3.1.0",
-    "pre-commit>=4.5.1",
+    "uvicorn[standard]>=0.41.0",
+    "python-multipart>=0.0.22",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
+    "python-dotenv>=1.2.2",
+    "httpx>=0.28.1",
+    "structlog>=24.0.0",
+]
+
+[project.optional-dependencies]
+aws = [
+    "boto3>=1.42.59",
+    "botocore>=1.42.59",
+    "opensearch-py>=3.1.0",
+    "redis>=7.2.1",
+]
+dev = [
+    "black>=26.1.0",
+    "flake8>=7.3.0",
+    "mypy>=1.19.1",
+
+]
+test = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.0.0",
-    "python-dotenv>=1.2.2",
-    "python-multipart>=0.0.22",
-    "redis>=7.2.1",
-    "uvicorn[standard]>=0.41.0",
+    "moto[dynamodb,s3,stepfunctions]>=5.1.21",
 ]
 
 [build-system]
@@ -39,3 +48,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/ragapp"]
 
+[tool.black]
+line-length = 120
+target-version = ["py312"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+strict = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
