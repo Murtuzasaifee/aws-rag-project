@@ -1,0 +1,46 @@
+# ── Web Framework ──────────────────────────────────────────────────────────────
+fastapi
+uvicorn[standard]
+python-multipart
+
+# ── AWS ────────────────────────────────────────────────────────────────────────
+boto3
+botocore
+
+# ── OpenSearch ─────────────────────────────────────────────────────────────────
+opensearch-py
+
+# ── Redis ──────────────────────────────────────────────────────────────────────
+redis
+
+# ── Config / Validation ────────────────────────────────────────────────────────
+pydantic
+pydantic-settings
+
+
+# ── Utilities ──────────────────────────────────────────────────────────────────
+python-dotenv
+httpx                   # async HTTP client (optional use)
+
+# ── Testing ────────────────────────────────────────────────────────────────────
+pytest
+pytest-asyncio
+pytest-cov
+moto[s3,dynamodb,stepfunctions]   # AWS mocking
+
+# ── Dev / Lint ─────────────────────────────────────────────────────────────────
+black
+flake8
+mypy
+pre-commit
+
+# ── CDK Infrastructure (install separately in infra env) ──────────────────────
+# aws-cdk-lib==2.155.0
+# constructs>=10.0.0,<11.0.0
+
+# ── Lambda: document_processor (Docker image — NOT installed here) ─────────────
+# docling
+# tiktoken
+
+# ── Lambda: embedding_generator + query_handler (zipped with Lambda) ───────────
+# boto3 is available natively in Lambda runtime — do not bundle
