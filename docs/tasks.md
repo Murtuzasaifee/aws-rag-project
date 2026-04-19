@@ -1,0 +1,79 @@
+# AWS RAG Project - Implementation Tasks
+
+## Phase 1: Ingestion Pipeline
+
+### 1.1 Document Upload & S3 Integration
+Configure S3 as the single source of truth for raw documents. Set up S3 buckets with versioning enabled, lifecycle policies for raw/processed/failed prefixes, and server-side encryption (SSE-KMS). Implement S3 event notifications to SQS to trigger downstream processing when a new document lands in the raw/ prefix. Add pre-signed URL generation for secure client-side uploads via API Gateway.
+
+### 1.2 Document Parsing & Text Extraction
+Build a document parsing service that extracts clean text from PDF, DOCX, TXT, HTML, and Markdown files. Use `pypdf`/`pdfplumber` for text-based PDFs and `python-docx` for DOCX files. For scanned documents, images, and complex PDFs with tables/forms, integrate AWS Textract as the OCR and layout extraction backend. Handle multi-page documents, extract page numbers, and preserve document structure (headings, sections, tables). Add file type detection, encoding validation (UTF-8 normalization), and structured error reporting for unsupported or corrupted files.
+
+### 1.3 Text Refinement & Normalization
+Clean and normalize extracted text before chunking. Remove boilerplate content (headers, footers, page numbers, watermarks, repeated navigation elements). Normalize whitespace, fix broken sentences across page boundaries, and handle special characters. Strip HTML/Markdown artifacts while preserving semantic structure. Add language detection to flag non-English documents and log warnings. Validate output quality by checking minimum text length and content-to-noise ratio.
+
+### 1.4 Chunking Strategy Engine
+Implement configurable text chunking with multiple strategies. Build a fixed-window chunker with configurable chunk size (default 512 tokens) and overlap (default 50 tokens) that breaks at paragraph and sentence boundaries. Add a recursive chunker for structured documents (code blocks, tables, lists) that respects document hierarchy. Implement token-based sizing using the same tokenizer as the embedding model to ensure chunks fit within Bedrock input limits. Each chunk must carry metadata: document_id, chunk_index, page_number, character offsets, and source document metadata.
+
+### 1.5 Embedding Generation Service
+Build an async embedding service using AWS Bedrock Titan Text Embeddings v2 (`amazon.titan-embed-text-v2:0`) with configurable output dimensions (default 1024). Implement batch processing respecting Bedrock's 25-document batch limit with automatic chunking of larger sets. Add exponential backoff retry logic for throttling (ThrottlingException) and transient failures. Implement an embedding caching layer in ElastiCache (Redis) using SHA-256 hash of input text as the cache key, with a 7-day TTL. Add input validation to enforce Bedrock's per-request token limit (8K tokens) and truncate or split oversized inputs.
+
+### 1.6 Vector Storage — OpenSearch Service
+Integrate Amazon OpenSearch Service as the vector database. Implement the VectorStore interface to manage k-NN indices with HNSW algorithm (configurable `m`, `ef_construct`, `ef_search` parameters). Build bulk indexing for chunk embeddings with metadata payloads (document_id, chunk_index, page_number, category, tags). Implement approximate k-NN vector similarity search with payload filtering (filter by category, document_id, date range). Add hybrid search combining k-NN vector search with BM25 keyword search using OpenSearch's hybrid query support. Implement point deletion by document_id for re-ingestion, index creation with field mappings, and connection health checks.
+
+### 1.7 Metadata Store — DynamoDB
+Implement document metadata tracking in DynamoDB. Design the table with `document_id` as the partition key and a GSI on `status` for querying documents by processing state. Store per-document metadata: S3 key, filename, file size, content type, upload timestamp, processing status (pending, parsing, chunking, embedding, indexing, completed, failed), chunk count, processing duration, error details, and custom tags (category, author). Implement atomic status transitions, conditional updates to prevent race conditions, and TTL-based cleanup for old failed records. Track per-chunk metadata (chunk_id, offsets, token count) as a DynamoDB map attribute.
+
+### 1.8 Ingestion Orchestration — Step Functions & SQS
+Build the ingestion pipeline orchestration using AWS Step Functions with SQS for inter-step communication. Design the state machine as a sequential workflow: Validate → Parse → Refine → Chunk → Embed → Index → Update Status. Each step reads from its own SQS queue and writes to the next step's queue. Implement checkpoint/restart by storing pipeline state in DynamoDB — if a step fails, the state machine can resume from the last completed step. Add Catch blocks in the state machine for each step that transition to a failure handler (update DynamoDB status to "failed", log error details, move S3 object to failed/ prefix). Configure SQS DLQs for each queue with a max receive count of 3. Set visibility timeouts aligned with Lambda execution duration.
+
+### 1.9 Incremental & Differential Processing
+Support incremental document updates without full re-ingestion. Use S3 object versioning and ETags to detect changes — compare the ETag of the incoming document against the stored ETag in DynamoDB. If unchanged, skip processing. If changed, delete existing chunks from OpenSearch by document_id, re-process only the modified document, and update metadata. Implement smart re-chunking by comparing chunk hashes to identify which sections changed, re-embedding only affected chunks. Add document deprecation via soft-delete flag in DynamoDB and exclude deprecated documents from search results via OpenSearch filters.
+
+### 1.10 Error Handling & Resilience
+Implement a comprehensive error handling framework aligned with AWS serverless patterns. Create a custom exception hierarchy: `ParsingError`, `ChunkingError`, `EmbeddingError`, `IndexingError`, each carrying document_id, step name, and retry-eligibility flag. Implement circuit breaker logic for Bedrock API calls — track consecutive failures in ElastiCache and short-circuit after a threshold. Classify errors as transient (retry with backoff), permanent (fail immediately, log details), or throttled (retry after delay from Retry-After header). Send critical failure alerts via CloudWatch Alarms with SNS notifications. Structure all error logs as JSON via structlog with correlation IDs (document_id, job_id) for end-to-end tracing in CloudWatch Logs Insights.
+
+## Phase 2: Retrieval Pipeline
+
+### 2.1 Query Processing & Normalization
+Build a query preprocessing service that cleans and normalizes user queries before embedding. Strip special characters, normalize whitespace, expand contractions, and handle mixed-case input. Implement query intent detection to classify queries as search (keyword-heavy), question (natural language), or comparison — this drives downstream routing decisions. Extract entities from queries using simple pattern matching or AWS Comprehend for entity extraction (person, organization, date, location). Log query metadata (length, detected intent, extracted entities) for analytics and retrieval quality monitoring.
+
+### 2.2 Query Router
+Implement a rule-based query router that directs queries to the optimal retrieval strategy. Route keyword-heavy queries (high ratio of specific terms, low semantic density) to BM25 keyword search. Route natural language questions to vector similarity search. Route mixed queries to hybrid search (vector + BM25 with Reciprocal Rank Fusion). Add configurable routing rules stored in DynamoDB or SSM Parameter Store so routing logic can be updated without code changes. Implement a fallback to hybrid search for queries that don't match any routing rule. Log routing decisions for later analysis and router optimization.
+
+### 2.3 Vector Similarity Search (OpenSearch kNN)
+Implement high-performance vector similarity search using OpenSearch k-NN. Configure `ef_search` parameter per query based on latency/accuracy tradeoff requirements. Execute approximate k-NN searches against the embeddings index, returning top-K results (default 5, configurable up to 20) with cosine similarity scores. Apply payload filters to narrow results by metadata (category, document_id, date range). Implement multi-field search that returns both vector scores and keyword match scores for downstream hybrid fusion. Optimize for p95 latency under 100ms. Add search result caching in ElastiCache using a hash of the query embedding + filters as the cache key, with a 1-hour TTL.
+
+### 2.4 Keyword Search (OpenSearch BM25)
+Implement BM25 keyword search using OpenSearch's full-text search capabilities. Configure analyzers with stemming, stop-word removal, and lowercase normalization. Support fuzzy matching with configurable edit distance for typo tolerance. Implement phrase matching and proximity queries for exact-term requirements. Add search highlighting to return matched text snippets in results. Return results with BM25 scores normalized to [0, 1] range for consistent fusion with vector scores.
+
+### 2.5 Hybrid Search with Reciprocal Rank Fusion
+Combine vector and keyword search results using Reciprocal Rank Fusion (RRF). Fetch over-recruited results from both retrievers (kNN returns `top_k * 4`, BM25 returns `top_k * 4`). Compute RRF scores using the formula `score = Σ 1 / (k + rank_i)` where `k = 60` (standard constant). Implement configurable weights for vector vs. keyword contribution. Re-rank the fused results and return the top-K. Add Maximum Marginal Relevance (MMR) diversification to reduce redundant chunks from the same document in the final result set.
+
+### 2.6 Re-ranking Engine
+Implement a re-ranking stage to improve retrieval precision. Use Bedrock to invoke a cross-encoder model that scores (query, chunk) pairs for relevance. Take the top 20 candidates from hybrid search, re-score each with the cross-encoder, and return the top-K (default 5) by re-rank score. Normalize scores across the result set. Add a configurable toggle to enable/disable re-ranking per request. Cache re-ranked results in ElastiCache with a 1-hour TTL for identical queries. Log re-ranking score changes to measure improvement over baseline retrieval.
+
+### 2.7 Context Assembly Service
+Assemble the final context window from retrieved and re-ranked chunks. Select the top-K chunks that fit within the LLM's context window (token budget), prioritizing by relevance score and source diversity (avoid over-representing a single document). Deduplicate overlapping content across chunks. Format the assembled context with clear source attribution markers (document name, page number) that the LLM can reference in its response. Track which chunks were included/excluded and log context quality metrics (coverage, diversity, total token count).
+
+### 2.8 LLM Answer Generation (Bedrock Claude)
+Generate answers using AWS Bedrock with Claude (`anthropic.claude-3-5-sonnet-20241022-v2:0`). Build the prompt from the system prompt (defined in Settings), assembled context, and user query. Enforce strict groundedness — the system prompt instructs the model to answer only from the provided context and explicitly state when information is insufficient. Configure generation parameters (max_tokens, temperature) from Settings. Parse the Claude response to extract the answer text and any inline source citations. Implement retry logic for Bedrock throttling and service errors. Add response caching in ElastiCache using a hash of (query + context chunks) as the key, with a 24-hour TTL.
+
+### 2.9 Retrieval Evaluation Framework
+Build an evaluation pipeline to measure retrieval and generation quality. Implement standard retrieval metrics: Precision@K, Recall@K, Mean Reciprocal Rank (MRR), and Normalized Discounted Cumulative Gain (NDCG). Create a benchmark dataset of (query, relevant_document_ids) pairs stored in S3. Implement generation quality metrics: faithfulness (answer grounded in context), relevance (answer addresses the query), and hallucination detection using Bedrock as a judge. Log all evaluation metrics to CloudWatch as custom metrics and build a CloudWatch dashboard for retrieval quality trends. Run evaluations as a Step Functions workflow triggered on schedule or on-demand.
+
+### 2.10 Retrieval API (API Gateway + Lambda)
+Build the production retrieval API. Expose `POST /api/query` for RAG queries and `GET /api/document/{id}/status` for ingestion status tracking. Implement request validation using Pydantic schemas (already defined in `schemas/query.py` and `schemas/ingest.py`). Add async request handling with concurrent embedding + search calls where possible. Implement API key authentication via API Gateway and rate limiting to prevent abuse. Add request/response logging with structured JSON logs including latency breakdown (embedding_ms, search_ms, llm_ms, total_ms). Configure CORS for frontend integration. The FastAPI application runs inside Lambda, fronted by API Gateway with Lambda Proxy Integration.
+
+## Phase 3: Infrastructure & Operations
+
+### 3.1 Infrastructure as Code (Terraform/CDK)
+Define all AWS resources as code using Terraform or AWS CDK. Provision: VPC with public/private subnets and NAT Gateway, S3 buckets with versioning and encryption, SQS queues with DLQs for each pipeline step, DynamoDB table with GSIs, OpenSearch Service domain (t3.medium for dev, production-grade for prod), ElastiCache Redis cluster, Lambda functions for each pipeline step, Step Functions state machine, API Gateway with Lambda integration, IAM roles with least-privilege policies, CloudWatch log groups with retention policies, KMS keys for encryption, and SSM Parameter Store for configuration. Separate environments (dev/staging/prod) with parameterized stacks.
+
+### 3.2 CI/CD Pipeline (GitHub Actions)
+Build GitHub Actions workflows for automated testing and deployment. On every PR: run linting (flake8), type checking (mypy), unit tests (pytest with moto for AWS mocking), and security scanning (Bandit). On merge to develop: build Docker images, push to ECR, deploy to staging environment. On merge to master: deploy to production with manual approval gate. Implement Lambda deployment packaging with dependency layering to keep cold starts low. Add automated rollback on deployment failure via CloudWatch alarm triggers.
+
+### 3.3 Monitoring & Observability (CloudWatch)
+Set up comprehensive monitoring across all pipeline components. Create CloudWatch dashboards for: ingestion throughput (documents/hour), embedding generation latency (p50/p95/p99), OpenSearch query latency, Bedrock API call count and error rate, Lambda execution duration and error rate, SQS queue depth and age of oldest message, DynamoDB read/write capacity consumption, and ElastiCache hit/miss ratio. Configure CloudWatch Alarms for: Lambda error rate > 1%, SQS DLQ depth > 0, OpenSearch cluster health yellow/red, Bedrock throttling events, and pipeline processing time exceeding SLA. Enable CloudWatch Logs Insights for structured log queries with correlation IDs.
+
+### 3.4 Security & Compliance
+Implement security hardening across all AWS resources. Store all secrets (OpenSearch credentials, API keys) in AWS Secrets Manager with automatic rotation. Enable encryption at rest using KMS for S3, DynamoDB, OpenSearch, and ElastiCache. Enforce encryption in transit (TLS 1.2+) for all inter-service communication. Configure VPC endpoints for S3, DynamoDB, and Bedrock to keep traffic within the AWS network. Set up IAM roles with least-privilege policies for each Lambda function — no shared roles. Enable CloudTrail for API audit logging. Implement request-level authentication via API Gateway with Cognito or Lambda authorizers. Add input sanitization on all API endpoints to prevent injection attacks.
