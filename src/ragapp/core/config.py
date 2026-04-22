@@ -87,7 +87,15 @@ class Settings(BaseSettings):
 
     # ── Document Processing ───────────────────────────────────────────────────
     max_file_size_mb: int = 50
-    allowed_extensions: list[str] = [".pdf", ".txt", ".docx", ".png", ".jpeg", ".jpg"]
+    allowed_extensions: list[str] = [".pdf", ".txt", ".docx", ".html", ".md"]
+    
+    # ── Document Parsing (Textract & Parsers) ──────────────────────────────────
+    aws_region: str = "us-east-1"
+    textract_feature_types: list[str] = ["TABLES", "FORMS"]  # AWS Textract features
+    textract_timeout_seconds: int = 300  # Timeout for Textract operations
+    parsing_confidence_threshold: float = 0.7  # Min confidence for extracted data
+    enable_ocr: bool = True  # Enable AWS Textract OCR for PDFs
+    enable_fallback_parsers: bool = True  # Fall back to simpler parsers if primary fails
 
     # ── System Prompt ─────────────────────────────────────────────────────────
     system_prompt: str = (
