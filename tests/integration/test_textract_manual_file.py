@@ -4,6 +4,14 @@ from ragapp.services.parsers.textract_parser import AWSTextractParser
 from ragapp.schemas.parsing import DocumentType
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    not all([
+        os.getenv("AWS_ACCESS_KEY_ID"),
+        os.getenv("AWS_SECRET_ACCESS_KEY"),
+        os.getenv("AWS_DEFAULT_REGION"),
+    ]),
+    reason="AWS credentials not fully configured"
+)
 async def test_textract_parse_manual_file():
     file_path = Path("test_data/Invoice.pdf")
     assert file_path.exists(), f"File not found: {file_path}"
