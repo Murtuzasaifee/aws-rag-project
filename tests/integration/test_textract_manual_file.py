@@ -1,3 +1,4 @@
+import os
 import pytest
 from pathlib import Path
 from ragapp.services.parsers.textract_parser import AWSTextractParser
