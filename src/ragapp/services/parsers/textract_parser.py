@@ -298,7 +298,12 @@ class AWSTextractParser(OCRParser):
             total_elements += len(page_elements)
             
             # Extract key-value pairs as forms
-            if "KEY_VALUE_SET" in [b.get("BlockType") for b in child_ids]:
+            # Check if any child blocks are KEY_VALUE_SET type
+            has_form = any(
+                block_map.get(child_id, {}).get("BlockType") == "KEY_VALUE_SET" 
+                for child_id in child_ids
+            )
+            if has_form:
                 form = self._extract_form(page_block, block_map, page_num)
                 if form:
                     page_forms.append(form)
