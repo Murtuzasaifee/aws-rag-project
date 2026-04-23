@@ -19,6 +19,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "httpx>=0.28.1",
     "structlog>=24.0.0",
+    "chardet>=5.0.0" 
 ]
 
 [project.optional-dependencies]
