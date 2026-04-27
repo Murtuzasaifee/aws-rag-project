@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudWatch Alarms for RAG Ingestion Pipeline Monitoring'
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment
+
+  OrgId:
+    Type: String
+    Description: Organization identifier (optional - if not provided, creates global alarms)
+    Default: ''
+
+  SqsQueueName:
+    Type: String
+    Description: Name of the SQS queue to monitor
+    Default: ''
+
+  SnsTopicArn:
+    Type: String
+    Description: ARN of the SNS topic for alarm notifications
+    Default: ''
+
+Conditions:
+  HasOrgId: !Not [!Equals [!Ref OrgId, '']]
+  HasSqsQueue: !Not [!Equals [!Ref SqsQueueName, '']]
+  HasSnsTopic: !Not [!Equals [!Ref SnsTopicArn, '']]
+
+Resources:
+  # SQS Approximate Age of Oldest Message Alarm
+  SqsAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasSqsQueue
+    Properties:
+      AlarmName: !If
+        - HasOrgId
+        - !Sub 'rag-sqs-age-${OrgId}-${Environment}'
+        - !Sub 'rag-sqs-age-${Environment}'
+      AlarmDescription: !If
+        - HasOrgId
+        - !Sub 'Alarm when SQS messages are older than 5 minutes for org ${OrgId}'
+        - 'Alarm when SQS messages are older than 5 minutes'
+      MetricName: ApproximateAgeOfOldestMessage
+      Namespace: AWS/SQS
+      Statistic: Maximum
+      Dimensions:
+        - Name: QueueName
+          Value: !Ref SqsQueueName
+      Threshold: 300  # 5 minutes
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 2
+      Period: 60
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - HasSnsTopic
+        - - !Ref SnsTopicArn
+        - []
+      OKActions: !If
+        - HasSnsTopic
+        - - !Ref SnsTopicArn
+        - []
+      Tags:
+        - Key: Name
+          Value: !If
+            - HasOrgId
+            - !Sub 'rag-sqs-age-${OrgId}-${Environment}'
+            - !Sub 'rag-sqs-age-${Environment}'
+        - Key: environment
+          Value: !Ref Environment
+        - Key: project
+          Value: rag
+        - Key: managed_by
+          Value: cloudformation
+
+  # SQS Approximate Number of Messages Visible Alarm (Backlog)
+  SqsBacklogAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasSqsQueue
+    Properties:
+      AlarmName: !If
+        - HasOrgId
+        - !Sub 'rag-sqs-backlog-${OrgId}-${Environment}'
+        - !Sub 'rag-sqs-backlog-${Environment}'
+      AlarmDescription: !If
+        - HasOrgId
+        - !Sub 'Alarm when SQS backlog exceeds 100 messages for org ${OrgId}'
+        - 'Alarm when SQS backlog exceeds 100 messages'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Statistic: Average
+      Dimensions:
+        - Name: QueueName
+          Value: !Ref SqsQueueName
+      Threshold: 100
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 3
+      Period: 300  # 5 minutes
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - HasSnsTopic
+        - - !Ref SnsTopicArn
+        - []
+      OKActions: !If
+        - HasSnsTopic
+        - - !Ref SnsTopicArn
+        - []
+      Tags:
+        - Key: Name
+          Value: !If
+            - HasOrgId
+            - !Sub 'rag-sqs-backlog-${OrgId}-${Environment}'
+            - !Sub 'rag-sqs-backlog-${Environment}'
+        - Key: environment
+          Value: !Ref Environment
+        - Key: project
+          Value: rag
+        - Key: managed_by
+          Value: cloudformation
+
+  # DynamoDB Read/Write Capacity Alarm (if using provisioned mode, or throttling on on-demand)
+  DynamoDBReadThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'rag-dynamodb-read-throttle-${Environment}'
+      AlarmDescription: 'Alarm when DynamoDB read throttling occurs'
+      MetricName: ReadThrottleEvents
+      Namespace: AWS/DynamoDB
+      Statistic: Sum
+      Dimensions:
+        - Name: TableName
+          Value: !Sub 'rag-documents-${Environment}'
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Period: 60
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - HasSnsTopic
+        - - !Ref SnsTopicArn
+        - []
+      Tags:
+        - Key: Name
+          Value: !Sub 'rag-dynamodb-read-throttle-${Environment}'
+        - Key: environment
+          Value: !Ref Environment
+        - Key: project
+          Value: rag
+        - Key: managed_by
+          Value: cloudformation
+
+  DynamoDBWriteThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'rag-dynamodb-write-throttle-${Environment}'
+      AlarmDescription: 'Alarm when DynamoDB write throttling occurs'
+      MetricName: WriteThrottleEvents
+      Namespace: AWS/DynamoDB
+      Statistic: Sum
+      Dimensions:
+        - Name: TableName
+          Value: !Sub 'rag-documents-${Environment}'
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Period: 60
+      TreatMissingData: notBreaching
+      AlarmActions: !If
+        - HasSnsTopic
+        - - !Ref SnsTopicArn
+        - []
+      Tags:
+        - Key: Name
+          Value: !Sub 'rag-dynamodb-write-throttle-${Environment}'
+        - Key: environment
+          Value: !Ref Environment
+        - Key: project
+          Value: rag
+        - Key: managed_by
+          Value: cloudformation
+
+Outputs:
+  SqsAgeAlarmArn:
+    Condition: HasSqsQueue
+    Description: ARN of the SQS age alarm
+    Value: !GetAtt SqsAgeAlarm.Arn
+
+  SqsBacklogAlarmArn:
+    Condition: HasSqsQueue
+    Description: ARN of the SQS backlog alarm
+    Value: !GetAtt SqsBacklogAlarm.Arn
+
+  DynamoDBReadThrottleAlarmArn:
+    Description: ARN of the DynamoDB read throttle alarm
+    Value: !GetAtt DynamoDBReadThrottleAlarm.Arn
+
+  DynamoDBWriteThrottleAlarmArn:
+    Description: ARN of the DynamoDB write throttle alarm
+    Value: !GetAtt DynamoDBWriteThrottleAlarm.Arn

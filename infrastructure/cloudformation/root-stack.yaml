@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Root stack for RAG Ingestion Pipeline - orchestrates all nested stacks per organization'
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment
+
+  Organisations:
+    Type: CommaDelimitedList
+    Description: Comma-separated list of organization IDs (e.g., acme,globex,initech)
+
+  ApiRoleArn:
+    Type: String
+    Description: ARN of the FastAPI backend IAM role
+    Default: ''
+
+  ProcessorRoleArn:
+    Type: String
+    Description: ARN of the processing service IAM role
+    Default: ''
+
+  AlertEmail:
+    Type: String
+    Description: Email address for DLQ CloudWatch alarm notifications
+    Default: 'alerts@example.com'
+
+  FrontendOrigin:
+    Type: String
+    Description: CORS origin for pre-signed URL uploads (e.g., https://app.example.com)
+    Default: '*'
+
+Conditions:
+  CreateIAMRoles: !Equals
+    - !Ref ApiRoleArn
+    - ''
+
+Resources:
+  # Single-instance stacks (not per-org)
+
+  S3AccessLogsStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./stacks/s3-access-logs.yaml
+      Parameters:
+        Environment: !Ref Environment
+      Tags:
+        - Key: project
+          Value: rag
+        - Key: environment
+          Value: !Ref Environment
+
+  DynamoDBStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./stacks/dynamodb-documents.yaml
+      Parameters:
+        Environment: !Ref Environment
+      Tags:
+        - Key: project
+          Value: rag
+        - Key: environment
+          Value: !Ref Environment
+
+  IAMRolesStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateIAMRoles
+    Properties:
+      TemplateURL: ./stacks/iam-roles.yaml
+      Parameters:
+        Environment: !Ref Environment
+        AccountId: !Ref AWS::AccountId
+        Region: !Ref AWS::Region
+      Tags:
+        - Key: project
+          Value: rag
+        - Key: environment
+          Value: !Ref Environment
+
+  # Per-organization stacks (dynamic based on Organisations parameter)
+  # Using explicit resource naming for each org
+  # Note: In production with many orgs, consider using AWS CloudFormation StackSets
+
+  # Example for first org (index 0)
+  KmsKeyStackOrg0:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./stacks/kms-org-key.yaml
+      Parameters:
+        OrgId: !Select [0, !Ref Organisations]
+        Environment: !Ref Environment
+        ApiRoleArn: !If [CreateIAMRoles, !GetAtt IAMRolesStack.Outputs.ApiRoleArn, !Ref ApiRoleArn]
+        ProcessorRoleArn: !If [CreateIAMRoles, !GetAtt IAMRolesStack.Outputs.ProcessorRoleArn, !Ref ProcessorRoleArn]
+      Tags:
+        - Key: org_id
+          Value: !Select [0, !Ref Organisations]
+        - Key: project
+          Value: rag
+        - Key: environment
+          Value: !Ref Environment
+
+  S3BucketStackOrg0:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - S3AccessLogsStack
+      - KmsKeyStackOrg0
+    Properties:
+      TemplateURL: ./stacks/s3-org-bucket.yaml
+      Parameters:
+        OrgId: !Select [0, !Ref Organisations]
+        Environment: !Ref Environment
+        KmsKeyArn: !GetAtt KmsKeyStackOrg0.Outputs.KmsKeyArn
+        AccessLogsBucketName: !GetAtt S3AccessLogsStack.Outputs.AccessLogsBucketName
+        SqsQueueArn: !GetAtt SqsStackOrg0.Outputs.QueueArn
+        ApiRoleArn: !If [CreateIAMRoles, !GetAtt IAMRolesStack.Outputs.ApiRoleArn, !Ref ApiRoleArn]
+        ProcessorRoleArn: !If [CreateIAMRoles, !GetAtt IAMRolesStack.Outputs.ProcessorRoleArn, !Ref ProcessorRoleArn]
+        FrontendOrigin: !Ref FrontendOrigin
+      Tags:
+        - Key: org_id
+          Value: !Select [0, !Ref Organisations]
+        - Key: project
+          Value: rag
+        - Key: environment
+          Value: !Ref Environment
+
+  SqsStackOrg0:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./stacks/sqs-ingestion.yaml
+      Parameters:
+        OrgId: !Select [0, !Ref Organisations]
+        Environment: !Ref Environment
+        KmsKeyArn: !GetAtt KmsKeyStackOrg0.Outputs.KmsKeyArn
+        ProcessorRoleArn: !If [CreateIAMRoles, !GetAtt IAMRolesStack.Outputs.ProcessorRoleArn, !Ref ProcessorRoleArn]
+        AlertEmail: !Ref AlertEmail
+      Tags:
+        - Key: org_id
+          Value: !Select [0, !Ref Organisations]
+        - Key: project
+          Value: rag
+        - Key: environment
+          Value: !Ref Environment
+
+  # Note: Additional organizations would follow the same pattern
+  # For 2+ organizations, you would add KmsKeyStackOrg1, S3BucketStackOrg1, etc.
+  # In a production scenario with many orgs, use StackSets or programmatic stack creation
+
+Outputs:
+  S3AccessLogsBucket:
+    Description: Name of the S3 access logs bucket
+    Value: !GetAtt S3AccessLogsStack.Outputs.AccessLogsBucketName
+
+  DynamoDBTable:
+    Description: Name of the DynamoDB documents table
+    Value: !GetAtt DynamoDBStack.Outputs.TableName
+
+  Org0Bucket:
+    Description: S3 bucket for first organization
+    Value: !GetAtt S3BucketStackOrg0.Outputs.BucketName
+    Condition: KmsKeyStackOrg0
+
+  Org0Queue:
+    Description: SQS queue for first organization
+    Value: !GetAtt SqsStackOrg0.Outputs.QueueUrl
+    Condition: KmsKeyStackOrg0

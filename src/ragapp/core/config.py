@@ -98,6 +98,56 @@ class Settings(BaseSettings):
         "Always cite the source document when referencing information."
     )
 
+    # ── AWS ───────────────────────────────────────────────────────────────────
+    aws_region: str = "ap-southeast-1"
+    aws_account_id: str = ""
+
+    # ── S3 ─────────────────────────────────────────────────────────────────────
+    s3_bucket_prefix: str = "rag-docs"
+    s3_raw_prefix: str = "raw"
+    s3_processed_prefix: str = "processed"
+    s3_failed_prefix: str = "failed"
+    s3_quarantine_prefix: str = "quarantine"
+    s3_max_file_size_mb: int = 50
+
+    # ── SQS ─────────────────────────────────────────────────────────────────────
+    sqs_queue_prefix: str = "rag-ingestion"
+    sqs_visibility_timeout: int = 300
+
+    # ── KMS ─────────────────────────────────────────────────────────────────────
+    kms_key_alias_prefix: str = "alias/rag-docs"
+
+    # ── DynamoDB ────────────────────────────────────────────────────────────────
+    dynamodb_documents_table: str = ""
+
+    # ── Cognito ─────────────────────────────────────────────────────────────────
+    cognito_user_pool_id: str = ""
+    cognito_app_client_id: str = ""
+    cognito_region: str = "ap-southeast-1"
+
+    # ── Upload Settings ─────────────────────────────────────────────────────────
+    max_file_size_mb: int = 50
+    allowed_extensions: set[str] = {"pdf", "docx", "txt", "png", "jpg", "jpeg", "tiff"}
+    presigned_url_expiry_seconds: int = 900
+
+    def get_org_bucket_name(self, org_id: str) -> str:
+        """Generate org-specific S3 bucket name."""
+        return f"{self.s3_bucket_prefix}-{org_id}-{self.environment}"
+
+    def get_org_kms_key_alias(self, org_id: str) -> str:
+        """Generate org-specific KMS key alias."""
+        return f"{self.kms_key_alias_prefix}-{org_id}"
+
+    def get_org_sqs_queue_name(self, org_id: str) -> str:
+        """Generate org-specific SQS queue name."""
+        return f"{self.sqs_queue_prefix}-{org_id}-{self.environment}.fifo"
+
+    def get_dynamodb_table_name(self) -> str:
+        """Get DynamoDB table name."""
+        if self.dynamodb_documents_table:
+            return self.dynamodb_documents_table
+        return f"rag-documents-{self.environment}"
+
 
 @lru_cache()
 def get_settings() -> Settings:

@@ -1,0 +1,329 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'IAM Roles for RAG Ingestion Pipeline (FastAPI Backend and Processing Service)'
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment
+
+  AccountId:
+    Type: String
+    Description: AWS Account ID
+    Default: ''
+
+  Region:
+    Type: String
+    Description: AWS Region
+    Default: ''
+
+Conditions:
+  UseAccountId: !Not [!Equals [!Ref AccountId, '']]
+  UseRegion: !Not [!Equals [!Ref Region, '']]
+
+Resources:
+  # FastAPI Backend Role
+  ApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'rag-api-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowEC2AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+                - ecs-tasks.amazonaws.com
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+          - Sid: AllowServiceLinkedRole
+            Effect: Allow
+            Principal:
+              AWS: !If
+                - UseAccountId
+                - !Sub 'arn:aws:iam::${AccountId}:root'
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref Environment
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PutObjectToOrgBuckets
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource: !Sub 'arn:aws:s3:::rag-docs-*-${Environment}/*'
+              - Sid: GetObjectFromRaw
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectAcl
+                Resource: !Sub 'arn:aws:s3:::rag-docs-*-${Environment}/raw/*'
+              - Sid: ListOrgBuckets
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub 'arn:aws:s3:::rag-docs-*-${Environment}'
+
+        - PolicyName: KMSAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: GenerateDataKeyForOrgBuckets
+                Effect: Allow
+                Action:
+                  - kms:GenerateDataKey
+                  - kms:GenerateDataKeyWithoutPlaintext
+                Resource: !Sub 'arn:aws:kms:*:${AWS::AccountId}:key/*'
+                Condition:
+                  StringEquals:
+                    'kms:ViaService': !Sub 's3.${AWS::Region}.amazonaws.com'
+              - Sid: DecryptForOrgBuckets
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !Sub 'arn:aws:kms:*:${AWS::AccountId}:key/*'
+                Condition:
+                  StringEquals:
+                    'kms:ViaService': !Sub 's3.${AWS::Region}.amazonaws.com'
+              - Sid: DescribeKeyForOrgBuckets
+                Effect: Allow
+                Action:
+                  - kms:DescribeKey
+                Resource: !Sub 'arn:aws:kms:*:${AWS::AccountId}:key/*'
+
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: DynamoDBCrudOperations
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:DescribeTable
+                Resource: !Sub 'arn:aws:dynamodb:*:${AWS::AccountId}:table/rag-documents-${Environment}'
+              - Sid: DynamoDBIndexAccess
+                Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource: !Sub 'arn:aws:dynamodb:*:${AWS::AccountId}:table/rag-documents-${Environment}/index/*'
+
+        - PolicyName: SQSAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SqsGetQueueUrl
+                Effect: Allow
+                Action:
+                  - sqs:GetQueueUrl
+                  - sqs:GetQueueAttributes
+                  - sqs:ListQueues
+                Resource: !Sub 'arn:aws:sqs:*:${AWS::AccountId}:rag-ingestion-*-${Environment}*'
+
+        - PolicyName: CognitoAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CognitoIdTokenValidation
+                Effect: Allow
+                Action:
+                  - cognito-idp:DescribeUserPool
+                  - cognito-idp:GetUser
+                Resource: '*'
+
+      Tags:
+        - Key: Name
+          Value: !Sub 'rag-api-role-${Environment}'
+        - Key: environment
+          Value: !Ref Environment
+        - Key: project
+          Value: rag
+        - Key: role_type
+          Value: api_backend
+        - Key: managed_by
+          Value: cloudformation
+
+  # Processing Service Role
+  ProcessorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'rag-processor-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowLambdaAssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: GetObjectFromAllPrefixes
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectAcl
+                  - s3:GetObjectVersion
+                Resource: !Sub 'arn:aws:s3:::rag-docs-*-${Environment}/*'
+              - Sid: PutObjectToProcessedFailed
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource:
+                  - !Sub 'arn:aws:s3:::rag-docs-*-${Environment}/processed/*'
+                  - !Sub 'arn:aws:s3:::rag-docs-*-${Environment}/failed/*'
+              - Sid: ListOrgBuckets
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                Resource: !Sub 'arn:aws:s3:::rag-docs-*-${Environment}'
+
+        - PolicyName: KMSAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: DecryptForOrgBuckets
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Sub 'arn:aws:kms:*:${AWS::AccountId}:key/*'
+                Condition:
+                  StringEquals:
+                    'kms:ViaService': !Sub 's3.${AWS::Region}.amazonaws.com'
+              - Sid: GenerateDataKeyForProcessedFailed
+                Effect: Allow
+                Action:
+                  - kms:GenerateDataKey
+                Resource: !Sub 'arn:aws:kms:*:${AWS::AccountId}:key/*'
+                Condition:
+                  StringEquals:
+                    'kms:ViaService': !Sub 's3.${AWS::Region}.amazonaws.com'
+
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: DynamoDBUpdateOperations
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:DescribeTable
+                Resource: !Sub 'arn:aws:dynamodb:*:${AWS::AccountId}:table/rag-documents-${Environment}'
+              - Sid: DynamoDBIndexAccess
+                Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource: !Sub 'arn:aws:dynamodb:*:${AWS::AccountId}:table/rag-documents-${Environment}/index/*'
+
+        - PolicyName: SQSAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SqsReceiveMessage
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:ChangeMessageVisibility
+                  - sqs:GetQueueUrl
+                  - sqs:GetQueueAttributes
+                Resource: !Sub 'arn:aws:sqs:*:${AWS::AccountId}:rag-ingestion-*-${Environment}*'
+
+        - PolicyName: TextractAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: TextractOperations
+                Effect: Allow
+                Action:
+                  - textract:StartDocumentAnalysis
+                  - textract:StartDocumentTextDetection
+                  - textract:GetDocumentAnalysis
+                  - textract:GetDocumentTextDetection
+                  - textract:AnalyzeDocument
+                Resource: '*'
+
+        - PolicyName: BedrockAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: BedrockInvokeModel
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  # Titan Embeddings
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed*'
+                  # Claude for text generation
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude*'
+
+      Tags:
+        - Key: Name
+          Value: !Sub 'rag-processor-role-${Environment}'
+        - Key: environment
+          Value: !Ref Environment
+        - Key: project
+          Value: rag
+        - Key: role_type
+          Value: processor
+        - Key: managed_by
+          Value: cloudformation
+
+Outputs:
+  ApiRoleArn:
+    Description: ARN of the FastAPI backend IAM role
+    Value: !GetAtt ApiRole.Arn
+    Export:
+      Name: !Sub 'rag-iam-api-role-${Environment}-arn'
+
+  ApiRoleName:
+    Description: Name of the FastAPI backend IAM role
+    Value: !Ref ApiRole
+    Export:
+      Name: !Sub 'rag-iam-api-role-${Environment}-name'
+
+  ProcessorRoleArn:
+    Description: ARN of the processing service IAM role
+    Value: !GetAtt ProcessorRole.Arn
+    Export:
+      Name: !Sub 'rag-iam-processor-role-${Environment}-arn'
+
+  ProcessorRoleName:
+    Description: Name of the processing service IAM role
+    Value: !Ref ProcessorRole
+    Export:
+      Name: !Sub 'rag-iam-processor-role-${Environment}-name'

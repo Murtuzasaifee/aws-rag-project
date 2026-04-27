@@ -1,0 +1,115 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'KMS Customer Managed Key per Organization for RAG Document Encryption'
+
+Parameters:
+  OrgId:
+    Type: String
+    Description: Organization identifier
+    AllowedPattern: '^[a-z0-9-]+$'
+    ConstraintDescription: Must be lowercase alphanumeric with hyphens only
+
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment
+
+  ApiRoleArn:
+    Type: String
+    Description: ARN of the FastAPI backend IAM role
+
+  ProcessorRoleArn:
+    Type: String
+    Description: ARN of the processing service IAM role
+
+Resources:
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub 'KMS key for RAG document encryption - Org ${OrgId} - ${Environment}'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          # Allow root account full admin
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+          # Allow FastAPI backend to generate data keys and decrypt
+          - Sid: Allow FastAPI Backend Use
+            Effect: Allow
+            Principal:
+              AWS: !Ref ApiRoleArn
+            Action:
+              - 'kms:GenerateDataKey'
+              - 'kms:GenerateDataKeyWithoutPlaintext'
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+            Resource: '*'
+
+          # Allow processing service to decrypt
+          - Sid: Allow Processing Service Decrypt
+            Effect: Allow
+            Principal:
+              AWS: !Ref ProcessorRoleArn
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+            Resource: '*'
+
+          # Allow S3 service to use the key for SSE-KMS
+          - Sid: Allow S3 Service
+            Effect: Allow
+            Principal:
+              Service: 's3.amazonaws.com'
+            Action:
+              - 'kms:GenerateDataKey'
+              - 'kms:Decrypt'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:CallerAccount': !Ref 'AWS::AccountId'
+                'kms:ViaService': !Sub 's3.${AWS::Region}.amazonaws.com'
+
+      Tags:
+        - Key: Name
+          Value: !Sub 'rag-docs-${OrgId}-${Environment}'
+        - Key: org_id
+          Value: !Ref OrgId
+        - Key: environment
+          Value: !Ref Environment
+        - Key: project
+          Value: rag
+        - Key: managed_by
+          Value: cloudformation
+
+  KmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/rag-docs-${OrgId}'
+      TargetKeyId: !Ref KmsKey
+
+Outputs:
+  KmsKeyArn:
+    Description: ARN of the KMS key
+    Value: !GetAtt KmsKey.Arn
+    Export:
+      Name: !Sub 'rag-kms-${OrgId}-${Environment}-arn'
+
+  KmsKeyId:
+    Description: ID of the KMS key
+    Value: !Ref KmsKey
+    Export:
+      Name: !Sub 'rag-kms-${OrgId}-${Environment}-id'
+
+  KmsAlias:
+    Description: Alias of the KMS key
+    Value: !Ref KmsAlias
+    Export:
+      Name: !Sub 'rag-kms-${OrgId}-${Environment}-alias'
