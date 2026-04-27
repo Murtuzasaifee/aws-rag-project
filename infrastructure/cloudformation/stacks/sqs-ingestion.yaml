@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'SQS FIFO Queue per Organization for RAG Ingestion Pipeline'
+
+Parameters:
+  OrgId:
+    Type: String
+    Description: Organization identifier
+    AllowedPattern: '^[a-z0-9-]+$'
+    ConstraintDescription: Must be lowercase alphanumeric with hyphens only
+
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment
+
+  KmsKeyArn:
+    Type: String
+    Description: ARN of the KMS key for SQS encryption
+
+  ProcessorRoleArn:
+    Type: String
+    Description: ARN of the processing service IAM role
+
+  AlertEmail:
+    Type: String
+    Description: Email address for DLQ CloudWatch alarm notifications
+
+Resources:
+  # Dead Letter Queue (DLQ) - non-FIFO for message retention
+  DlqQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'rag-ingestion-dlq-${OrgId}-${Environment}'
+      MessageRetentionPeriod: 1209600  # 14 days
+      KmsMasterKeyId: !Ref KmsKeyArn
+      KmsDataKeyReusePeriodSeconds: 86400  # 24 hours
+      Tags:
+        - Key: Name
+          Value: !Sub 'rag-ingestion-dlq-${OrgId}-${Environment}'
+        - Key: org_id
+          Value: !Ref OrgId
+        - Key: environment
+          Value: !Ref Environment
+        - Key: project
+          Value: rag
+        - Key: queue_type
+          Value: dlq
+        - Key: managed_by
+          Value: cloudformation
+
+  # Main FIFO Queue
+  MainQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'rag-ingestion-${OrgId}-${Environment}.fifo'
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      VisibilityTimeout: 300  # 5 minutes (allow time for Textract)
+      MessageRetentionPeriod: 1209600  # 14 days
+      KmsMasterKeyId: !Ref KmsKeyArn
+      KmsDataKeyReusePeriodSeconds: 86400  # 24 hours
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DlqQueue.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub 'rag-ingestion-${OrgId}-${Environment}.fifo'
+        - Key: org_id
+          Value: !Ref OrgId
+        - Key: environment
+          Value: !Ref Environment
+        - Key: project
+          Value: rag
+        - Key: queue_type
+          Value: main
+        - Key: managed_by
+          Value: cloudformation
+
+  # Queue Policy
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref MainQueue
+        - !Ref DlqQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Allow S3 service to send messages
+          - Sid: AllowS3ServiceSendMessage
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt MainQueue.Arn
+            Condition:
+              ArnLike:
+                'aws:SourceArn': !Sub 'arn:aws:s3:::rag-docs-${OrgId}-${Environment}'
+              StringEquals:
+                'aws:SourceAccount': !Ref 'AWS::AccountId'
+
+          # Allow processing service to receive/delete messages
+          - Sid: AllowProcessingService
+            Effect: Allow
+            Principal:
+              AWS: !Ref ProcessorRoleArn
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:ChangeMessageVisibility
+              - sqs:GetQueueAttributes
+            Resource:
+              - !GetAtt MainQueue.Arn
+              - !GetAtt DlqQueue.Arn
+
+  # SNS Topic for DLQ alerts
+  DlqAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'rag-dlq-alerts-${OrgId}-${Environment}'
+      KmsMasterKeyId: !Ref KmsKeyArn
+      Tags:
+        - Key: Name
+          Value: !Sub 'rag-dlq-alerts-${OrgId}-${Environment}'
+        - Key: org_id
+          Value: !Ref OrgId
+        - Key: environment
+          Value: !Ref Environment
+        - Key: project
+          Value: rag
+
+  DlqAlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      TopicArn: !Ref DlqAlertTopic
+      Endpoint: !Ref AlertEmail
+
+  # CloudWatch Alarm for DLQ depth
+  DlqDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'rag-dlq-depth-${OrgId}-${Environment}'
+      AlarmDescription: !Sub 'Alarm when DLQ for org ${OrgId} has messages'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Statistic: Sum
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt DlqQueue.QueueName
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Period: 60
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref DlqAlertTopic
+      Tags:
+        - Key: Name
+          Value: !Sub 'rag-dlq-depth-${OrgId}-${Environment}'
+        - Key: org_id
+          Value: !Ref OrgId
+        - Key: environment
+          Value: !Ref Environment
+        - Key: project
+          Value: rag
+
+Outputs:
+  QueueUrl:
+    Description: URL of the main SQS FIFO queue
+    Value: !Ref MainQueue
+    Export:
+      Name: !Sub 'rag-sqs-${OrgId}-${Environment}-url'
+
+  QueueArn:
+    Description: ARN of the main SQS FIFO queue
+    Value: !GetAtt MainQueue.Arn
+    Export:
+      Name: !Sub 'rag-sqs-${OrgId}-${Environment}-arn'
+
+  QueueName:
+    Description: Name of the main SQS FIFO queue
+    Value: !GetAtt MainQueue.QueueName
+    Export:
+      Name: !Sub 'rag-sqs-${OrgId}-${Environment}-name'
+
+  DlqUrl:
+    Description: URL of the DLQ
+    Value: !Ref DlqQueue
+    Export:
+      Name: !Sub 'rag-dlq-${OrgId}-${Environment}-url'
+
+  DlqArn:
+    Description: ARN of the DLQ
+    Value: !GetAtt DlqQueue.Arn
+    Export:
+      Name: !Sub 'rag-dlq-${OrgId}-${Environment}-arn'

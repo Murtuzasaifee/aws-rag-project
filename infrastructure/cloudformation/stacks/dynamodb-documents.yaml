@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'DynamoDB Documents Table for RAG Metadata Storage'
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment
+
+Resources:
+  DocumentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'rag-documents-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+
+      # Primary Key
+      KeySchema:
+        - AttributeName: org_id
+          KeyType: HASH
+        - AttributeName: document_id
+          KeyType: RANGE
+
+      # Attribute Definitions
+      AttributeDefinitions:
+        - AttributeName: org_id
+          AttributeType: S
+        - AttributeName: document_id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: uploaded_at
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+
+      # Global Secondary Indexes
+      GlobalSecondaryIndexes:
+        # GSI 1: Query documents by user
+        - IndexName: UserDocuments
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: uploaded_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+        # GSI 2: Query documents by status (for processing)
+        - IndexName: StatusIndex
+          KeySchema:
+            - AttributeName: org_id
+              KeyType: HASH
+            - AttributeName: status
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+      # Point-in-time recovery for disaster recovery
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+      # Server-side encryption (AWS managed key)
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+
+      # Time-to-live for failed documents (auto-cleanup)
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+      # Stream for capturing changes (useful for event-driven processing)
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+      Tags:
+        - Key: Name
+          Value: !Sub 'rag-documents-${Environment}'
+        - Key: environment
+          Value: !Ref Environment
+        - Key: project
+          Value: rag
+        - Key: managed_by
+          Value: cloudformation
+
+Outputs:
+  TableName:
+    Description: Name of the DynamoDB documents table
+    Value: !Ref DocumentsTable
+    Export:
+      Name: !Sub 'rag-dynamodb-documents-${Environment}-name'
+
+  TableArn:
+    Description: ARN of the DynamoDB documents table
+    Value: !GetAtt DocumentsTable.Arn
+    Export:
+      Name: !Sub 'rag-dynamodb-documents-${Environment}-arn'
+
+  TableStreamArn:
+    Description: ARN of the DynamoDB table stream
+    Value: !GetAtt DocumentsTable.StreamArn
+    Export:
+      Name: !Sub 'rag-dynamodb-documents-${Environment}-stream-arn'
