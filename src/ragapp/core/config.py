@@ -6,7 +6,9 @@ All values are read from environment variables or a .env file.
 """
 
 from functools import lru_cache
-from typing import List, Union
+from typing import List
+
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,8 +39,28 @@ class Settings(BaseSettings):
     allowed_origins: List[str] = ["*"]
     port: int | None = 8000
 
-    # # ── AWS Region ─────────────────────────────────────────────────────────────
-    # aws_region: str = "us-east-1"
+    # ── AWS (shared clients in dependencies) ───────────────────────────────────
+    aws_region: str = "us-east-1"
+    bedrock_region: str = "us-east-1"
+
+    # ── Bedrock — Titan text embeddings ─────────────────────────────────────────
+    embedding_model_id: str = "amazon.titan-embed-text-v2:0"
+    embedding_dimensions: int = Field(default=1024, description="Titan v2 supports 256, 512, or 1024.")
+    embedding_batch_size: int = Field(
+        default=25,
+        ge=1,
+        le=25,
+        description="Documents per batch chunk (Bedrock Titan embedding limit is 25).",
+    )
+    embedding_normalize: bool = True
+
+    @field_validator("embedding_dimensions")
+    @classmethod
+    def validate_titan_v2_dimensions(cls, value: int) -> int:
+        allowed = {256, 512, 1024}
+        if value not in allowed:
+            raise ValueError(f"embedding_dimensions must be one of {sorted(allowed)}, got {value}")
+        return value
 
     # # ── S3 ─────────────────────────────────────────────────────────────────────
     # s3_bucket_name: str  # e.g. rag-documents-dev
@@ -60,12 +82,6 @@ class Settings(BaseSettings):
     # redis_host: str  # e.g. rag-cache.xxx.cache.amazonaws.com
     # redis_port: int = 6379
     # redis_db: int = 0
-
-    # # ── Bedrock — Embeddings ───────────────────────────────────────────────────
-    # bedrock_region: str = "us-east-1"
-    # embedding_model_id: str = "amazon.titan-embed-text-v2:0"
-    # embedding_dimensions: int = 1024
-    # embedding_batch_size: int = 25
 
     # # ── Bedrock — LLM ─────────────────────────────────────────────────────────
     # llm_model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
