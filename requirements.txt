@@ -44,3 +44,5 @@ pre-commit
 
 # ── Lambda: embedding_generator + query_handler (zipped with Lambda) ───────────
 # boto3 is available natively in Lambda runtime — do not bundle
+
+tiktoken>=0.4.0

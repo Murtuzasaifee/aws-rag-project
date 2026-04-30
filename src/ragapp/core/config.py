@@ -62,32 +62,35 @@ class Settings(BaseSettings):
     # redis_db: int = 0
 
     # # ── Bedrock — Embeddings ───────────────────────────────────────────────────
-    # bedrock_region: str = "us-east-1"
-    # embedding_model_id: str = "amazon.titan-embed-text-v2:0"
-    # embedding_dimensions: int = 1024
-    # embedding_batch_size: int = 25
+    bedrock_region: str = "us-east-1"
+    embedding_model_id: str = "amazon.titan-embed-text-v2"
+    embedding_dimensions: int = 1024
+    embedding_batch_size: int = 25
 
     # # ── Bedrock — LLM ─────────────────────────────────────────────────────────
-    # llm_model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
-    # llm_max_tokens: int = 4096
-    # llm_temperature: float = 0.7
+    llm_model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    llm_max_tokens: int = 4096
+    llm_temperature: float = 0.7
 
     # # ── Step Functions ─────────────────────────────────────────────────────────
-    # state_machine_arn: str = ""  # set after CDK deployment
+    state_machine_arn: str = ""  # set after CDK deployment
 
     # # ── Retrieval ─────────────────────────────────────────────────────────────
-    # default_top_k: int = 5
-    # knn_candidates: int = 20  # kNN fetches 20, RRF narrows to top_k
-    # rrf_k_constant: int = 60  # standard RRF constant
+    default_top_k: int = 5
+    knn_candidates: int = 20  # kNN fetches 20, RRF narrows to top_k
+    rrf_k_constant: int = 60  # standard RRF constant
 
     # # ── Cache TTLs (seconds) ──────────────────────────────────────────────────
-    # cache_ttl_embedding: int = 604800  # 7 days
-    # cache_ttl_query_result: int = 3600  # 1 hour
-    # cache_ttl_llm_response: int = 86400  # 24 hours
+    cache_ttl_embedding: int = 604800  # 7 days
+    cache_ttl_query_result: int = 3600  # 1 hour
+    cache_ttl_llm_response: int = 86400  # 24 hours
 
     # ── Document Processing ───────────────────────────────────────────────────
     max_file_size_mb: int = 50
     allowed_extensions: list[str] = [".pdf", ".txt", ".docx", ".png", ".jpeg", ".jpg"]
+    chunk_size_tokens: int = 512
+    chunk_overlap_tokens: int = 50
+    max_chunk_tokens: int = 512
 
     # ── System Prompt ─────────────────────────────────────────────────────────
     system_prompt: str = (
