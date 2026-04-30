@@ -244,6 +244,9 @@ class RecursiveChunker(ChunkingStrategy):
         page_number: int | None,
         source_metadata: dict[str, Any] | None,
     ) -> list[Chunk]:
+        if not block.content.strip():
+            return []
+
         if self.tokenizer.count_tokens(block.content) <= self.chunk_size:
             return [
                 Chunk(
