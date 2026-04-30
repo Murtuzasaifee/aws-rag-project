@@ -64,3 +64,24 @@ class TestChunkText:
         assert chunks
         assert all(chunk.token_count <= 30 for chunk in chunks)
         assert any("```python" in chunk.content or "bullet" in chunk.content for chunk in chunks)
+
+    def test_recursive_chunker_handles_code_table_and_list_blocks(self):
+        text = (
+            "Paragraph before block.\n\n"
+            "```python\nprint(\"hello\")\nfor i in range(3):\n    print(i)\n```\n\n"
+            "- list item one\n"
+            "- list item two\n\n"
+            "| Col1 | Col2 |\n"
+            "| ---- | ---- |\n"
+            "| a | b |\n"
+            "| c | d |\n"
+        )
+
+        chunks = chunk_text(text, "doc-structured", strategy="recursive", chunk_size=40, chunk_overlap=10)
+
+        assert chunks
+        assert all(chunk.token_count <= 40 for chunk in chunks)
+        assert any("```python" in chunk.content for chunk in chunks)
+        assert any("- list item" in chunk.content for chunk in chunks)
+        assert any("| Col1 | Col2 |" in chunk.content or "| a | b |" in chunk.content for chunk in chunks)
+        assert any(chunk.source_metadata == {} for chunk in chunks)
