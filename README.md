@@ -29,6 +29,26 @@ AWS RAG Platform is a modern, scalable backend service for building Retrieval-Au
 - **🛠️ Extensible** - Modular architecture for easy customization and extension
 - **📖 API Documentation** - Auto-generated docs with Swagger UI and ReDoc
 
+## 🧩 Chunking Technique
+
+This project uses a modular, token-aware chunking service in `src/ragapp/services/chunking.py`.
+
+- Default strategy: `FixedWindowChunker`
+  - token-based chunk size: `512` tokens
+  - overlap: `50` tokens
+  - tries to split at paragraph and sentence boundaries
+- Structured strategy: `RecursiveChunker`
+  - detects document blocks like code, tables, lists, and paragraphs
+  - recursively splits large blocks while preserving document hierarchy
+- Uses the same tokenizer as the embedding model (`amazon.titan-embed-text-v2`)
+  - ensures chunks fit Bedrock input limits
+- Each chunk carries metadata:
+  - `document_id`
+  - `chunk_index`
+  - `page_number`
+  - `character_offsets`
+  - `source_metadata`
+
 ## 🛠️ Tech Stack
 
 | Category          | Technology             |
