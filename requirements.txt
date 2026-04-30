@@ -18,9 +18,17 @@ pydantic
 pydantic-settings
 
 
-# ── Utilities ──────────────────────────────────────────────────────────────────
+# ── Document Parsing ──────────────────────────────────────────────────────────────
+chardet                 # Encoding detection
+beautifulsoup4          # HTML parsing
+python-docx             # DOCX parsing
+pypdf                   # PDF utilities (fallback)
+html5lib                # HTML5 parsing
+
+# ── Utilities ──────────────────────────────────────────────────────────────────────
 python-dotenv
 httpx                   # async HTTP client (optional use)
+structlog               # Structured logging (JSON output)
 
 # ── Testing ────────────────────────────────────────────────────────────────────
 pytest
