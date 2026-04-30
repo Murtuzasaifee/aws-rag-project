@@ -6,7 +6,6 @@ Unit tests for the text chunking service.
 
 from ragapp.services.chunking import Chunk, RecursiveChunker, chunk_text
 
-
 class TestChunkText:
     def test_empty_text_returns_no_chunks(self):
         assert chunk_text("", "doc-1") == []
